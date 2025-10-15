@@ -1,16 +1,27 @@
 routes:
-    "https://{all}/": { type: upstream, upstream: "app:http" }
-    "http://{all}/": { type: redirect, to: "https://{all}/" }
+    "https://{all}/":
+        type: upstream
+        upstream: "app:http"
+    "http://{all}/":
+        type: redirect
+        to: "https://{all}/"
 
-services: {}
-    
+services:
+    database:
+        type: "postgresql:16"
+    mercure:
+        type: mercure:0
+        configuration:
+            anonymous: false
+            cors_origins:
+                - "*"
 
 applications:
     app:
         source:
             root: "/"
 
-        type: php:8.2
+        type: php:8.4
 
         runtime:
             extensions:
@@ -19,16 +30,18 @@ applications:
                 - ctype
                 - iconv
                 - mbstring
-                - pdo_sqlite
+                - pdo_pgsql
                 - sodium
                 - xsl
-                
 
         variables:
             php:
                 opcache.preload: config/preload.php
         build:
-            flavor: none
+            flavor: composer
+
+        relationships:
+            database: "database:postgresql"
 
         web:
             locations:
@@ -42,27 +55,22 @@ applications:
             "/var/cache/prod/pools/app": { source: storage, source_path: var/cache/prod/pools/app }
             "/data": { source: storage, source_path: "data" }
 
-        
         hooks:
             build: |
                 set -x -e
-
                 curl -fs https://get.symfony.com/cloud/configurator | bash
-                
                 NODE_VERSION=22 symfony-build
 
             deploy: |
                 set -x -e
-
                 symfony-deploy
+                php bin/console d:s:u --force --no-interaction
+                php bin/console cache:clear --no-warmup
 
         crons:
             security-check:
-                # Check that no security issues have been found for PHP packages deployed in production
                 spec: '50 23 * * *'
                 cmd: if [ "$PLATFORM_ENVIRONMENT_TYPE" = "production" ]; then croncape COMPOSER_ROOT_VERSION=1.0.0 COMPOSER_AUDIT_ABANDONED=ignore composer audit --no-cache; fi
             clean-expired-sessions:
                 spec: '17,47 * * * *'
                 cmd: croncape php-session-clean
-
-        
